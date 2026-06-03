@@ -81,6 +81,38 @@ begin
     end;
 end;
 
+// Helper function to check if a document path exists in an open project
+function IsOpenDoc(Path: String): Boolean;
+var
+    Project     : IProject;
+    ProjectIdx, I  : Integer;
+    Doc: IDocument;
+begin
+    result := False;
+
+    for ProjectIdx := 0 to GetWorkspace.DM_ProjectCount - 1 do
+    begin
+        Project := GetWorkspace.DM_Projects(ProjectIdx);
+        if Project = Nil then Exit;
+
+        if Path = Project.DM_ProjectFullPath then
+        begin
+            result := True;
+            Exit;
+        end;
+
+        for I := 0 to Project.DM_LogicalDocumentCount - 1 do
+        begin
+            Doc := Project.DM_LogicalDocuments(I);
+            if Path = Doc.DM_FullPath then
+            begin
+                result := True;
+                Exit;
+            end;
+        end;
+    end;
+end;
+
 // Try to open and focus a schematic sheet in the given project.
 function FocusSchDocumentInProject(Project: IProject): Boolean;
 var
@@ -724,38 +756,5 @@ begin
     finally
         ResultProps.Free;
         ContainerResults.Free;
-    end;
-end;
-
-// Helper function to check if a document is open
-function IsOpenDoc(Path: String): Boolean;
-var
-    Project     : IProject;
-    ProjectIdx, I  : Integer;
-    Doc: IDocument;
-begin
-    result := False;
-
-    for ProjectIdx := 0 to GetWorkspace.DM_ProjectCount - 1 do
-    begin
-        Project := GetWorkspace.DM_Projects(ProjectIdx);
-        if Project = Nil then Exit;
-
-        if Path = Project.DM_ProjectFullPath then
-        begin
-            result := True;
-            Exit;
-        end;
-
-        // Iterate documents
-        for I := 0 to Project.DM_LogicalDocumentCount - 1 do
-        begin
-            Doc := Project.DM_LogicalDocuments(I);
-            if Path = Doc.DM_FullPath then
-            begin
-                result := True;
-                Exit;
-            end;
-        end;
     end;
 end;
