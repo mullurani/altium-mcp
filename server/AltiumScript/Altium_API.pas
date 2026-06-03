@@ -793,7 +793,7 @@ begin
         'place_power_ports':
             Result := ExecutePlacePowerPorts(RequestData);
         'get_unconnected_pins':
-            Result := GetUnconnectedPins();
+            Result := GetUnconnectedPins;
         'get_pcb_layers':
             Result := GetPCBLayers(ROOT_DIR);            
         'set_pcb_layer_visibility':
