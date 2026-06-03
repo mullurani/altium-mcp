@@ -81,15 +81,67 @@ begin
     end;
 end;
 
+// Try to open and focus a schematic sheet in the given project.
+function FocusSchDocumentInProject(Project: IProject): Boolean;
+var
+    I       : Integer;
+    Doc     : IDocument;
+    SchDoc  : ISch_Document;
+begin
+    Result := False;
+    if Project = Nil then Exit;
+
+    // Prefer schematic sheets that are already open in the editor
+    for I := 0 to Project.DM_LogicalDocumentCount - 1 do
+    begin
+        Doc := Project.DM_LogicalDocuments(I);
+        if (Doc.DM_DocumentKind = 'SCH') and IsOpenDoc(Doc.DM_FullPath) then
+        begin
+            Doc.DM_OpenAndFocusDocument;
+            Sleep(500);
+            if SchServer <> Nil then
+            begin
+                SchDoc := SchServer.GetCurrentSchDocument;
+                if (SchDoc <> Nil) and (SchDoc.ObjectID = eSch) then
+                begin
+                    Result := True;
+                    Exit;
+                end;
+            end;
+        end;
+    end;
+
+    for I := 0 to Project.DM_LogicalDocumentCount - 1 do
+    begin
+        Doc := Project.DM_LogicalDocuments(I);
+        if Doc.DM_DocumentKind = 'SCH' then
+        begin
+            Doc.DM_OpenAndFocusDocument;
+            Sleep(500);
+            if SchServer <> Nil then
+            begin
+                SchDoc := SchServer.GetCurrentSchDocument;
+                if (SchDoc <> Nil) and (SchDoc.ObjectID = eSch) then
+                begin
+                    Result := True;
+                    Exit;
+                end;
+            end;
+        end;
+    end;
+end;
+
 // Modify the EnsureDocumentFocused function to handle all document types
 // and return more detailed information
 function EnsureDocumentFocused(CommandName: String): Boolean;
 var
     I           : Integer;
+    ProjectIdx  : Integer;
     Project     : IProject;
     Doc         : IDocument;
     DocFound    : Boolean;
     CurrentDoc  : IServerDocument;
+    SchDoc      : ISch_Document;
     DocumentKind: String;
     LogMessage  : String;
     OutJobPath: String;
@@ -171,14 +223,6 @@ begin
     
     // ShowMessage(LogMessage); // For debugging
     
-    // Retrieve the current project
-    Project := GetWorkspace.DM_FocusedProject;
-    If Project = Nil Then
-    begin
-        // No project is open
-        Exit;
-    end;
-
     // Check if the correct document type is already focused
     if (DocumentKind = 'PCB') and (PCBServer <> Nil) then
     begin
@@ -190,8 +234,8 @@ begin
     end
     else if (DocumentKind = 'SCH') and (SchServer <> Nil) then
     begin
-        CurrentDoc := SchServer.GetCurrentSchDocument;
-        if CurrentDoc <> Nil then
+        SchDoc := SchServer.GetCurrentSchDocument;
+        if (SchDoc <> Nil) and (SchDoc.ObjectID = eSch) then
         begin
             Result := True;
             Exit;
@@ -224,35 +268,53 @@ begin
         end;
     end;
 
-    // Try to find and focus the required document type
+    // SCH: search all open projects (focused project may be Altium_API.PrjScr, not the PCB design)
+    if DocumentKind = 'SCH' then
+    begin
+        Project := GetWorkspace.DM_FocusedProject;
+        if FocusSchDocumentInProject(Project) then
+        begin
+            Result := True;
+            Exit;
+        end;
+
+        for ProjectIdx := 0 to GetWorkspace.DM_ProjectCount - 1 do
+        begin
+            Project := GetWorkspace.DM_Projects(ProjectIdx);
+            if FocusSchDocumentInProject(Project) then
+            begin
+                Result := True;
+                Exit;
+            end;
+        end;
+
+        ShowMessage('Error: No SCH document found. Open a schematic (.SchDoc) in your PCB project and click its tab.');
+        Result := False;
+        Exit;
+    end;
+
+    // Retrieve the current project for other document kinds
+    Project := GetWorkspace.DM_FocusedProject;
+    If Project = Nil Then
+    begin
+        Exit;
+    end;
+
+    // Try to find and focus the required document type in the focused project
     For I := 0 to Project.DM_LogicalDocumentCount - 1 Do
     Begin
         Doc := Project.DM_LogicalDocuments(I);
         If Doc.DM_DocumentKind = DocumentKind Then
         Begin
             DocFound := True;
-            // Try to open and focus the document
             Doc.DM_OpenAndFocusDocument;
-            // Give it a moment to focus
             Sleep(500);
 
-            // Verify that the document is now focused
             if DocumentKind = 'PCB' then
             begin
                 if PCBServer.GetCurrentPCBBoard <> Nil then
                 begin
                     Result := True;
-                    // ShowMessage('Successfully focused PCB document');
-                    Exit;
-                end;
-            end
-            else if DocumentKind = 'SCH' then
-            begin
-                CurrentDoc := SchServer.GetCurrentSchDocument;
-                if (CurrentDoc <> Nil) then
-                begin
-                    Result := True;
-                    // ShowMessage('Successfully focused SCH document');
                     Exit;
                 end;
             end
@@ -262,7 +324,6 @@ begin
                 if (CurrentDoc <> Nil) and (CurrentDoc.ObjectID = eSchLib) then
                 begin
                     Result := True;
-                    // ShowMessage('Successfully focused SCHLIB document');
                     Exit;
                 end;
             end
@@ -286,18 +347,10 @@ begin
         End;
     End;
 
-    // TODO: Do I want to iterate through all workspace projects to find valid document if it is not current document?
-    // Could use IWorkspace.DM_ProjectCount and for loop
-
-    // No matching document found or couldn't be focused
     if not DocFound then
-    begin
-        ShowMessage('Error: No ' + DocumentKind + ' document found in the project.');
-    end
+        ShowMessage('Error: No ' + DocumentKind + ' document found in the project.')
     else
-    begin
         ShowMessage('Error: Found ' + DocumentKind + ' document but could not focus it.');
-    end;
     
     Result := False;
 end;
