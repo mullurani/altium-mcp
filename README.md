@@ -158,6 +158,11 @@ The server provides several tools to interact with Altium Designer:
 - `get_symbol_placement_rules`: Create symbol's helper tool that reads `~\AppData\Roaming\Claude\Claude Extensions\local.dxt.altium-mcp\server\symbol_placement_rules.txt` to get pin placement rules for symbol creation.
 - `get_library_symbol_reference`: Create symbol's helper tool to use an open library symbol as an example to create the symbol
 - `search_library_symbol`: Search for a symbol by name in a schematic library (.SchLib) and navigate to it. Supports partial name matching. Will open the library file in Altium if a path is provided, or show a file picker if not.
+- `place_net_labels`: Place net labels on schematic component pins to define connectivity without drawing wires. Assignments use `"DESIGNATOR|PIN|NET"` strings (e.g. `["U1|VCC|3V3", "U2|VCC|3V3"]`).
+- `place_power_ports`: Place power port symbols (GND ground style, VCC bar style) on schematic pins using the same assignment format.
+- `get_unconnected_pins`: List schematic pins with no net assigned (requires open project; runs compile).
+- `place_diff_pair_labels`: Place `_P` / `_N` net labels for a differential pair in one call.
+- `place_bus_labels`: Expand bus templates like `"U1|D{i}|DATA{i}"` across a bit range and place all labels.
 
 ![Symbol Creator](assets/symbol_creator.gif)
 

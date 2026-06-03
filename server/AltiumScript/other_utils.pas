@@ -133,7 +133,10 @@ begin
     begin
         DocumentKind := 'PCBLIB';
     end
-    else if (CommandName = 'get_schematic_data')             then
+    else if (CommandName = 'get_schematic_data')             or
+            (CommandName = 'place_net_labels')               or
+            (CommandName = 'place_power_ports')              or
+            (CommandName = 'get_unconnected_pins')           then
     begin
         DocumentKind := 'SCH';
     end

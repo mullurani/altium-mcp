@@ -708,6 +708,62 @@ begin
     end;
 end;
 
+// Parse assignments array from request (shared by place_net_labels and place_power_ports)
+function ParseAssignmentsList(RequestData: TStringList): TStringList;
+var
+    ParamValue: String;
+    i: Integer;
+begin
+    Result := TStringList.Create;
+    for i := 0 to RequestData.Count - 1 do
+    begin
+        if (Pos('"assignments"', RequestData[i]) > 0) then
+        begin
+            i := i + 1;
+            while (i < RequestData.Count) and (Pos(']', RequestData[i]) = 0) do
+            begin
+                ParamValue := StringReplace(RequestData[i], '"', '', REPLACEALL);
+                ParamValue := StringReplace(ParamValue, ',', '', REPLACEALL);
+                ParamValue := Trim(ParamValue);
+                if (ParamValue <> '') and (ParamValue <> '[') then
+                    Result.Add(ParamValue);
+                i := i + 1;
+            end;
+            Break;
+        end;
+    end;
+end;
+
+function ExecutePlaceNetLabels(RequestData: TStringList): String;
+var
+    AssignmentsList: TStringList;
+begin
+    AssignmentsList := ParseAssignmentsList(RequestData);
+    try
+        if AssignmentsList.Count > 0 then
+            Result := PlaceNetLabels(AssignmentsList)
+        else
+            Result := '{"success": false, "error": "No assignments provided"}';
+    finally
+        AssignmentsList.Free;
+    end;
+end;
+
+function ExecutePlacePowerPorts(RequestData: TStringList): String;
+var
+    AssignmentsList: TStringList;
+begin
+    AssignmentsList := ParseAssignmentsList(RequestData);
+    try
+        if AssignmentsList.Count > 0 then
+            Result := PlacePowerPorts(AssignmentsList)
+        else
+            Result := '{"success": false, "error": "No assignments provided"}';
+    finally
+        AssignmentsList.Free;
+    end;
+end;
+
 // Function to execute a command with parameters
 function ExecuteCommand(CommandName: String): String;
 begin
@@ -731,7 +787,13 @@ begin
         'create_schematic_symbol':
             Result := ExecuteCreateSchematicSymbol(RequestData);            
         'get_schematic_data':
-            Result := GetSchematicData(ROOT_DIR);            
+            Result := GetSchematicData(ROOT_DIR);
+        'place_net_labels':
+            Result := ExecutePlaceNetLabels(RequestData);
+        'place_power_ports':
+            Result := ExecutePlacePowerPorts(RequestData);
+        'get_unconnected_pins':
+            Result := GetUnconnectedPins();
         'get_pcb_layers':
             Result := GetPCBLayers(ROOT_DIR);            
         'set_pcb_layer_visibility':

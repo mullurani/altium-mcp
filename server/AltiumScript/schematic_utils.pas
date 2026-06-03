@@ -750,3 +750,303 @@ begin
         ComponentsArray.Free;
     end;
 end;
+
+function PlaceNetLabels(AssignmentsList: TStringList): String;
+var
+    SchDoc        : ISch_Document;
+    Iterator      : ISch_Iterator;
+    PinIterator   : ISch_Iterator;
+    Component     : ISch_Component;
+    Pin           : ISch_Pin;
+    NetLabel      : ISch_NetLabel;
+    AssignData    : TStringList;
+    Designator, PinName, NetName : String;
+    CompX, CompY, PinLocalX, PinLocalY, WorldX, WorldY : Integer;
+    PlacedCount, SkippedCount, I : Integer;
+    PlacedFlags   : array of Boolean;
+    ResultProps   : TStringList;
+    NotFoundArray : TStringList;
+begin
+    SchDoc := SchServer.GetCurrentSchDocument;
+    if (SchDoc = Nil) or (SchDoc.ObjectID <> eSch) then
+    begin
+        Result := 'ERROR: Please open and focus a schematic document (.SchDoc)';
+        Exit;
+    end;
+    PlacedCount := 0;
+    SkippedCount := 0;
+    SetLength(PlacedFlags, AssignmentsList.Count);
+    AssignData    := TStringList.Create;
+    ResultProps   := TStringList.Create;
+    NotFoundArray := TStringList.Create;
+    try
+        AssignData.Delimiter := '|';
+        SchServer.ProcessControl.PreProcess(SchDoc, '');
+
+        Iterator := SchDoc.SchIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Component := Iterator.FirstSchObject;
+        while Component <> Nil do
+        begin
+            CompX := CoordToMils(Component.Location.X);
+            CompY := CoordToMils(Component.Location.Y);
+
+            for I := 0 to AssignmentsList.Count - 1 do
+            begin
+                if PlacedFlags[I] then Continue;
+                AssignData.DelimitedText := AssignmentsList[I];
+                if AssignData.Count < 3 then Continue;
+                Designator := Trim(AssignData[0]);
+                if Component.Designator.Text <> Designator then Continue;
+
+                PinName := Trim(AssignData[1]);
+                NetName := Trim(AssignData[2]);
+
+                PinIterator := Component.SchIterator_Create;
+                PinIterator.AddFilter_ObjectSet(MkSet(ePin));
+                Pin := PinIterator.FirstSchObject;
+                while Pin <> Nil do
+                begin
+                    if (Pin.Name = PinName) or (Pin.Designator = PinName) then
+                    begin
+                        PinLocalX := CoordToMils(Pin.Location.X);
+                        PinLocalY := CoordToMils(Pin.Location.Y);
+                        // TODO: handle Component.IsMirrored — when True, negate PinLocalX before rotation
+                        case Component.Orientation of
+                            eRotate90:  begin WorldX := CompX - PinLocalY; WorldY := CompY + PinLocalX; end;
+                            eRotate180: begin WorldX := CompX - PinLocalX; WorldY := CompY - PinLocalY; end;
+                            eRotate270: begin WorldX := CompX + PinLocalY; WorldY := CompY - PinLocalX; end;
+                        else            begin WorldX := CompX + PinLocalX; WorldY := CompY + PinLocalY; end;
+                        end;
+                        NetLabel := SchServer.SchObjectFactory(eNetLabel, eCreate_Default);
+                        if NetLabel <> Nil then
+                        begin
+                            NetLabel.Location := Point(MilsToCoord(WorldX), MilsToCoord(WorldY));
+                            NetLabel.Text := NetName;
+                            NetLabel.Orientation := eRotate0;
+                            SchDoc.AddSchObject(NetLabel);
+                            SchServer.RobotManager.SendMessage(nil, c_BroadCast,
+                                SCHM_PrimitiveRegistration, NetLabel.I_ObjectAddress);
+                            PlacedFlags[I] := True;
+                            PlacedCount := PlacedCount + 1;
+                        end;
+                        Break;
+                    end;
+                    Pin := PinIterator.NextSchObject;
+                end;
+                Component.SchIterator_Destroy(PinIterator);
+            end;
+            Component := Iterator.NextSchObject;
+        end;
+        SchDoc.SchIterator_Destroy(Iterator);
+
+        SchServer.ProcessControl.PostProcess(SchDoc, '');
+        SchDoc.GraphicallyInvalidate;
+
+        for I := 0 to AssignmentsList.Count - 1 do
+        begin
+            if not PlacedFlags[I] then
+            begin
+                AssignData.DelimitedText := AssignmentsList[I];
+                if AssignData.Count >= 2 then
+                    NotFoundArray.Add('"' + JSONEscapeString(Trim(AssignData[0]) + '.' + Trim(AssignData[1])) + '"')
+                else
+                    NotFoundArray.Add('"' + JSONEscapeString(AssignmentsList[I]) + '"');
+                SkippedCount := SkippedCount + 1;
+            end;
+        end;
+
+        AddJSONBoolean(ResultProps, 'success', True);
+        AddJSONInteger(ResultProps, 'placed_count', PlacedCount);
+        AddJSONInteger(ResultProps, 'skipped_count', SkippedCount);
+        if NotFoundArray.Count > 0 then
+            ResultProps.Add('"not_found": ' + BuildJSONArray(NotFoundArray));
+        Result := BuildJSONObject(ResultProps);
+    finally
+        AssignData.Free;
+        ResultProps.Free;
+        NotFoundArray.Free;
+    end;
+end;
+
+function PlacePowerPorts(AssignmentsList: TStringList): String;
+var
+    SchDoc        : ISch_Document;
+    Iterator      : ISch_Iterator;
+    PinIterator   : ISch_Iterator;
+    Component     : ISch_Component;
+    Pin           : ISch_Pin;
+    PowerPort     : ISch_PowerPort;
+    AssignData    : TStringList;
+    Designator, PinName, NetName : String;
+    CompX, CompY, PinLocalX, PinLocalY, WorldX, WorldY : Integer;
+    PlacedCount, SkippedCount, I : Integer;
+    PlacedFlags   : array of Boolean;
+    ResultProps   : TStringList;
+    NotFoundArray : TStringList;
+begin
+    SchDoc := SchServer.GetCurrentSchDocument;
+    if (SchDoc = Nil) or (SchDoc.ObjectID <> eSch) then
+    begin
+        Result := 'ERROR: Please open and focus a schematic document (.SchDoc)';
+        Exit;
+    end;
+    PlacedCount := 0;
+    SkippedCount := 0;
+    SetLength(PlacedFlags, AssignmentsList.Count);
+    AssignData    := TStringList.Create;
+    ResultProps   := TStringList.Create;
+    NotFoundArray := TStringList.Create;
+    try
+        AssignData.Delimiter := '|';
+        SchServer.ProcessControl.PreProcess(SchDoc, '');
+
+        Iterator := SchDoc.SchIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Component := Iterator.FirstSchObject;
+        while Component <> Nil do
+        begin
+            CompX := CoordToMils(Component.Location.X);
+            CompY := CoordToMils(Component.Location.Y);
+
+            for I := 0 to AssignmentsList.Count - 1 do
+            begin
+                if PlacedFlags[I] then Continue;
+                AssignData.DelimitedText := AssignmentsList[I];
+                if AssignData.Count < 3 then Continue;
+                Designator := Trim(AssignData[0]);
+                if Component.Designator.Text <> Designator then Continue;
+
+                PinName := Trim(AssignData[1]);
+                NetName := Trim(AssignData[2]);
+
+                PinIterator := Component.SchIterator_Create;
+                PinIterator.AddFilter_ObjectSet(MkSet(ePin));
+                Pin := PinIterator.FirstSchObject;
+                while Pin <> Nil do
+                begin
+                    if (Pin.Name = PinName) or (Pin.Designator = PinName) then
+                    begin
+                        PinLocalX := CoordToMils(Pin.Location.X);
+                        PinLocalY := CoordToMils(Pin.Location.Y);
+                        // TODO: handle Component.IsMirrored — when True, negate PinLocalX before rotation
+                        case Component.Orientation of
+                            eRotate90:  begin WorldX := CompX - PinLocalY; WorldY := CompY + PinLocalX; end;
+                            eRotate180: begin WorldX := CompX - PinLocalX; WorldY := CompY - PinLocalY; end;
+                            eRotate270: begin WorldX := CompX + PinLocalY; WorldY := CompY - PinLocalX; end;
+                        else            begin WorldX := CompX + PinLocalX; WorldY := CompY + PinLocalY; end;
+                        end;
+                        PowerPort := SchServer.SchObjectFactory(ePowerPort, eCreate_Default);
+                        if PowerPort <> Nil then
+                        begin
+                            PowerPort.Location := Point(MilsToCoord(WorldX), MilsToCoord(WorldY));
+                            PowerPort.Text := NetName;
+                            if (UpperCase(NetName) = 'GND')  or (UpperCase(NetName) = 'VSS')  or
+                               (UpperCase(NetName) = 'AGND') or (UpperCase(NetName) = 'PGND') then
+                            begin
+                                PowerPort.Style := epPowerPort_PowerGround;
+                                PowerPort.Orientation := eRotate270;
+                            end
+                            else
+                            begin
+                                PowerPort.Style := epPowerPort_Bar;
+                                PowerPort.Orientation := eRotate90;
+                            end;
+                            SchDoc.AddSchObject(PowerPort);
+                            SchServer.RobotManager.SendMessage(nil, c_BroadCast,
+                                SCHM_PrimitiveRegistration, PowerPort.I_ObjectAddress);
+                            PlacedFlags[I] := True;
+                            PlacedCount := PlacedCount + 1;
+                        end;
+                        Break;
+                    end;
+                    Pin := PinIterator.NextSchObject;
+                end;
+                Component.SchIterator_Destroy(PinIterator);
+            end;
+            Component := Iterator.NextSchObject;
+        end;
+        SchDoc.SchIterator_Destroy(Iterator);
+
+        SchServer.ProcessControl.PostProcess(SchDoc, '');
+        SchDoc.GraphicallyInvalidate;
+
+        for I := 0 to AssignmentsList.Count - 1 do
+        begin
+            if not PlacedFlags[I] then
+            begin
+                AssignData.DelimitedText := AssignmentsList[I];
+                if AssignData.Count >= 2 then
+                    NotFoundArray.Add('"' + JSONEscapeString(Trim(AssignData[0]) + '.' + Trim(AssignData[1])) + '"')
+                else
+                    NotFoundArray.Add('"' + JSONEscapeString(AssignmentsList[I]) + '"');
+                SkippedCount := SkippedCount + 1;
+            end;
+        end;
+
+        AddJSONBoolean(ResultProps, 'success', True);
+        AddJSONInteger(ResultProps, 'placed_count', PlacedCount);
+        AddJSONInteger(ResultProps, 'skipped_count', SkippedCount);
+        if NotFoundArray.Count > 0 then
+            ResultProps.Add('"not_found": ' + BuildJSONArray(NotFoundArray));
+        Result := BuildJSONObject(ResultProps);
+    finally
+        AssignData.Free;
+        ResultProps.Free;
+        NotFoundArray.Free;
+    end;
+end;
+
+function GetUnconnectedPins(): String;
+var
+    Project     : IProject;
+    Doc         : IDocument;
+    Comp        : IComponent;
+    Pin         : IPin;
+    ResultArray : TStringList;
+    PinProps    : TStringList;
+    I, J, K     : Integer;
+begin
+    Project := GetWorkspace.DM_FocusedProject;
+    if Project = Nil then
+    begin
+        Result := 'ERROR: No project is currently open. Open a project (.PrjPcb) to use this tool.';
+        Exit;
+    end;
+
+    Project.DM_Compile;
+
+    ResultArray := TStringList.Create;
+    try
+        for I := 0 to Project.DM_LogicalDocumentCount - 1 do
+        begin
+            Doc := Project.DM_LogicalDocuments(I);
+            if Doc.DM_DocumentKind <> 'SCH' then Continue;
+
+            for J := 0 to Doc.DM_ComponentCount - 1 do
+            begin
+                Comp := Doc.DM_Components(J);
+                for K := 0 to Comp.DM_PinCount - 1 do
+                begin
+                    Pin := Comp.DM_Pins(K);
+                    if Pin.DM_NetName = '' then
+                    begin
+                        PinProps := TStringList.Create;
+                        try
+                            AddJSONProperty(PinProps, 'designator', Comp.DM_PhysicalDesignator);
+                            AddJSONProperty(PinProps, 'pin_name', Pin.DM_PinName);
+                            AddJSONProperty(PinProps, 'pin_number', Pin.DM_PinNumber);
+                            ResultArray.Add(BuildJSONObject(PinProps, 1));
+                        finally
+                            PinProps.Free;
+                        end;
+                    end;
+                end;
+            end;
+        end;
+
+        Result := BuildJSONArray(ResultArray);
+    finally
+        ResultArray.Free;
+    end;
+end;

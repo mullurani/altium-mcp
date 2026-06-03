@@ -681,6 +681,149 @@ async def create_schematic_symbol(ctx: Context, symbol_name: str, description: s
     return json.dumps(result, indent=2)
 
 @mcp.tool()
+async def place_net_labels(ctx: Context, assignments: list) -> str:
+    """
+    Place net labels on schematic component pins to define connectivity.
+    Altium treats all pins sharing the same net label name as electrically connected.
+    No wires are needed — net label names are the connection.
+
+    Duplicate labels on the same pin may cause ERC warnings.
+
+    Args:
+        assignments (list): Pipe-delimited strings: "DESIGNATOR|PIN_NAME|NET_NAME"
+            e.g. ["U1|VCC|3V3", "U2|VCC|3V3", "C1|1|3V3"]
+            PIN_NAME can be the pin name (e.g. "VCC") or pin number (e.g. "1").
+
+    Returns:
+        str: JSON with placed_count, skipped_count, and not_found list
+    """
+    logger.info(f"place_net_labels: {len(assignments)} assignments")
+    response = await altium_bridge.execute_command(
+        "place_net_labels",
+        {"assignments": assignments}
+    )
+    if not response.get("success", False):
+        error_msg = response.get("error", "Unknown error")
+        logger.error(f"Error placing net labels: {error_msg}")
+        return json.dumps({"success": False, "error": f"Failed to place net labels: {error_msg}"})
+    return json.dumps(response.get("result", {}), indent=2)
+
+@mcp.tool()
+async def place_power_ports(ctx: Context, assignments: list) -> str:
+    """
+    Place Altium power port symbols (VCC, GND, etc.) on schematic component pins.
+    GND/VSS/AGND/PGND use the ground symbol pointing down; other nets use a bar pointing up.
+
+    Args:
+        assignments (list): Pipe-delimited strings: "DESIGNATOR|PIN_NAME|NET_NAME"
+            e.g. ["U1|GND|GND", "C1|2|GND", "U2|VCC|3V3"]
+
+    Returns:
+        str: JSON with placed_count, skipped_count, and not_found list
+    """
+    logger.info(f"place_power_ports: {len(assignments)} assignments")
+    response = await altium_bridge.execute_command(
+        "place_power_ports",
+        {"assignments": assignments}
+    )
+    if not response.get("success", False):
+        error_msg = response.get("error", "Unknown error")
+        logger.error(f"Error placing power ports: {error_msg}")
+        return json.dumps({"success": False, "error": f"Failed to place power ports: {error_msg}"})
+    return json.dumps(response.get("result", {}), indent=2)
+
+@mcp.tool()
+async def get_unconnected_pins(ctx: Context) -> str:
+    """
+    Return all pins on schematic sheets in the open project that have no net assigned.
+
+    Requires an open Altium project (.PrjPcb), not just a standalone .SchDoc, because it
+    calls DM_Compile to resolve connectivity. Compilation may take several seconds.
+
+    Returns:
+        str: JSON array of {designator, pin_name, pin_number} objects
+    """
+    logger.info("get_unconnected_pins")
+    response = await altium_bridge.execute_command("get_unconnected_pins", {})
+    if not response.get("success", False):
+        error_msg = response.get("error", "Unknown error")
+        logger.error(f"Error getting unconnected pins: {error_msg}")
+        return json.dumps({"error": f"Failed to get unconnected pins: {error_msg}"})
+    pins_data = response.get("result", [])
+    if isinstance(pins_data, str):
+        try:
+            pins_data = json.loads(pins_data)
+        except json.JSONDecodeError:
+            pass
+    return json.dumps(pins_data, indent=2)
+
+@mcp.tool()
+async def place_diff_pair_labels(
+    ctx: Context,
+    pos_assignment: str,
+    neg_assignment: str,
+    add_directive: bool = True,
+) -> str:
+    """
+    Place net labels for a differential pair on two schematic component pins.
+    Follows Altium's _P/_N naming convention.
+
+    Args:
+        pos_assignment (str): Pipe-delimited positive pin: "DESIGNATOR|PIN_NAME|NET_NAME_P"
+        neg_assignment (str): Pipe-delimited negative pin: "DESIGNATOR|PIN_NAME|NET_NAME_N"
+        add_directive (bool): If True, place a diff-pair directive (not yet implemented).
+
+    Returns:
+        str: JSON with placed_count, skipped_count, not_found list
+    """
+    if add_directive:
+        logger.info(
+            "place_diff_pair_labels: add_directive=True requested but not yet implemented; net labels placed only"
+        )
+    response = await altium_bridge.execute_command(
+        "place_net_labels",
+        {"assignments": [pos_assignment, neg_assignment]},
+    )
+    if not response.get("success", False):
+        error_msg = response.get("error", "Unknown error")
+        logger.error(f"Error placing diff pair labels: {error_msg}")
+        return json.dumps({"success": False, "error": f"Failed to place diff pair labels: {error_msg}"})
+    return json.dumps(response.get("result", {}), indent=2)
+
+@mcp.tool()
+async def place_bus_labels(
+    ctx: Context,
+    bus_name: str,
+    bit_range: list,
+    assignments: list,
+) -> str:
+    """
+    Place indexed net labels for a multi-bit bus across multiple component pins in one call.
+
+    Args:
+        bus_name (str): Base bus name for {bus} placeholder (e.g. "DATA")
+        bit_range (list): Two-element list [low, high] inclusive (e.g. [0, 7])
+        assignments (list): Pipe-delimited templates with {i} and/or {bus}:
+            e.g. ["U1|D{i}|DATA{i}", "U4|D{i}|DATA{i}"]
+
+    Returns:
+        str: JSON with placed_count, skipped_count, not_found list
+    """
+    if len(bit_range) != 2:
+        return json.dumps({"success": False, "error": "bit_range must be a two-element list [low, high]"})
+    expanded = []
+    for template in assignments:
+        for bit in range(bit_range[0], bit_range[1] + 1):
+            expanded.append(template.replace("{i}", str(bit)).replace("{bus}", bus_name))
+    logger.info(f"place_bus_labels: expanded to {len(expanded)} assignments")
+    response = await altium_bridge.execute_command("place_net_labels", {"assignments": expanded})
+    if not response.get("success", False):
+        error_msg = response.get("error", "Unknown error")
+        logger.error(f"Error placing bus labels: {error_msg}")
+        return json.dumps({"success": False, "error": f"Failed to place bus labels: {error_msg}"})
+    return json.dumps(response.get("result", {}), indent=2)
+
+@mcp.tool()
 async def get_schematic_data(ctx: Context, cmp_designators: list) -> str:
     """
     Get schematic data for components in Altium
