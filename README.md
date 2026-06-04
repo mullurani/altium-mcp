@@ -20,6 +20,41 @@ Note: Having Claude place components on the PCB currently fails hard.
 - Give me a list of all IC designators in my design
 - Get me all length matching rules
 
+## Declarative net connection (JITX-like)
+
+Instead of placing labels one pin at a time, you can describe connectivity as a
+set of named nets and let the server wire it up. A net is just a name and the
+pins it joins:
+
+```
+# server/examples/sample.netlist
+power GND 3V3 5V
+net GND (U1.GND, U2.GND, C1.2, C2.2)
+net 3V3 (U1.VCC, C1.1)
+net UART_TX (U1.PA9 -> U2.RX)
+bus DATA[0:7] (U1.D{i}, U3.D{i})
+diff USB0 (U1.USB_DP/USB_DM, J1.DP/DN)
+class HighSpeed { USB0_P USB0_N }
+```
+
+Then drive it with commands:
+
+- **Apply** – "Apply the netlist at server/examples/sample.netlist" → `apply_netlist`
+  validates every pin against the live schematic, then auto-mixes the realization
+  (power/ground → power ports, 2-pin same-sheet nets → wires, buses/diffs → labels,
+  everything else → net labels). It is **idempotent** — re-running places nothing
+  new and reports `skipped_existing`/`conflicts`.
+- **Review** – "Check my netlist against the schematic" → `check_netlist` compiles
+  the project and reports each net as `OK` / `MISSING` / `CONFLICT` (the review
+  process becomes a command prompt).
+- **Bootstrap** – "Export the current connectivity to a netlist" → `export_netlist`
+  dumps the live schematic as a `.netlist` you can edit and re-apply.
+- **Inline** – `connect_nets` takes nets directly (no file) for one-off commands.
+- **Read-back** – `get_netlist` returns the actual pin→net map.
+
+Grammar and the auto-mix rules live in `server/netlist_rules.txt`. Differential
+pairs are realized using Altium's `_P`/`_N` net-label convention.
+
 ## Installing the MCP Server
 The easiest way to install is to use Claude Code, point it to this repo and ask it to install it for you. Or alternatively, see below.
 

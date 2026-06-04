@@ -1,0 +1,24 @@
+# Sample declarative netlist for the Altium MCP.
+# Edit designators/pins to match your open schematic, then:
+#   apply_netlist("server/examples/sample.netlist")   # place it
+#   check_netlist("server/examples/sample.netlist")   # review it
+
+# Power / ground -> realized as power port symbols.
+power GND 3V3 5V
+
+net GND (U1.GND, U2.GND, C1.2, C2.2)
+net 3V3 (U1.VCC, C1.1)
+net 5V  (U2.VDD, C2.1)
+
+# Signal nets. 2-pin same-sheet nets become wires; the rest become net labels.
+net UART_TX (U1.PA9 -> U2.RX)
+net SPI_CLK (U1.PA5, U2.SCK, U3.SCK)
+
+# A multi-bit bus -> indexed net labels DATA0..DATA7.
+bus DATA[0:7] (U1.D{i}, U3.D{i})
+
+# A differential pair -> USB0_P / USB0_N net labels.
+diff USB0 (U1.USB_DP/USB_DM, J1.DP/DN)
+
+# A net class (pushed to the PCB; requires the PCB open).
+class HighSpeed { USB0_P USB0_N SPI_CLK }

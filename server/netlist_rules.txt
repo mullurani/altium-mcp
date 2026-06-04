@@ -1,0 +1,55 @@
+Netlist command language (JITX-like declarative net connection)
+================================================================
+
+A .netlist file describes WHAT should be connected; `apply_netlist` figures out
+HOW to draw it and `check_netlist` reviews intent vs. the real schematic.
+Parsing is deterministic (done in Python, not by the model), so results repeat.
+
+STATEMENTS
+----------
+# comment                         Anything after '#' is ignored.
+
+power NAME [NAME ...]             Force these nets to be realized as power ports.
+
+net NAME (pinref, pinref, ...)    A net is an unordered SET of pins.
+                                  '->' may be used instead of ',' (cosmetic).
+                                  Optional trailing  style=auto|label|wire|power.
+
+bus NAME[lo:hi] (D.tmpl, ...)     Indexed bus. Each pin template must contain
+                                  '{i}'. Expands to NAMElo..NAMEhi.
+                                  e.g.  bus DATA[0:7] (U1.D{i}, U3.D{i})
+
+diff NAME (DES.POS/NEG, ...)      Differential pair -> NAME_P / NAME_N labels.
+                                  e.g.  diff USB0 (U1.DP/DM, J1.DP/DN)
+
+class NAME { net net ... }        Net class -> pushed to the PCB (create_net_class).
+                                  Requires the PCB document to be open.
+
+bundle NAME { sig sig ... }       Capability model (advanced):
+component DES supports NAME {        declare reusable signal groups, map them to
+   sig=PIN, sig=PIN }                a component's pins, then connect by name.
+require A.NAME <-> B.NAME          require expands to one net per shared signal.
+
+PIN REFERENCES
+--------------
+DESIGNATOR.PIN   where PIN is a pin name (VCC) OR a pin number (1).
+
+AUTO-MIX (how `style=auto`, the default, is realized)
+-----------------------------------------------------
+- Power/ground nets (a `power` declaration, or names like GND, VCC, 3V3, +12V,
+  1V8) -> power port symbols.
+- Exactly 2 pins on the SAME sheet            -> a drawn wire.
+- Buses                                       -> indexed net labels.
+- Differential pairs                          -> _P/_N net labels.
+- Everything else (multi-pin / cross-sheet)   -> matching net labels.
+Override per net with `style=`.
+
+NOTES
+-----
+- apply_netlist VALIDATES every pin against the live schematic first; if any
+  reference is wrong, nothing is placed.
+- apply_netlist is idempotent: re-running places nothing new (skipped_existing)
+  and flags conflicts where a different net already sits on a pin.
+- check_netlist / get_netlist compile the project (needs an open .PrjPcb).
+- Wired nets get an Altium-assigned name, so review matches by net MEMBERSHIP,
+  not by name.

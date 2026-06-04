@@ -134,7 +134,7 @@ begin
             if SchServer <> Nil then
             begin
                 SchDoc := SchServer.GetCurrentSchDocument;
-                if (SchDoc <> Nil) and (SchDoc.ObjectID = eSch) then
+                if (SchDoc <> Nil) and (SchDoc.ObjectID <> eSchLib) then
                 begin
                     Result := True;
                     Exit;
@@ -153,7 +153,7 @@ begin
             if SchServer <> Nil then
             begin
                 SchDoc := SchServer.GetCurrentSchDocument;
-                if (SchDoc <> Nil) and (SchDoc.ObjectID = eSch) then
+                if (SchDoc <> Nil) and (SchDoc.ObjectID <> eSchLib) then
                 begin
                     Result := True;
                     Exit;
@@ -220,7 +220,10 @@ begin
     else if (CommandName = 'get_schematic_data')             or
             (CommandName = 'place_net_labels')               or
             (CommandName = 'place_power_ports')              or
-            (CommandName = 'get_unconnected_pins')           then
+            (CommandName = 'connect_pins')                   or
+            (CommandName = 'place_diff_pair_directives')     or
+            (CommandName = 'get_unconnected_pins')           or
+            (CommandName = 'get_pin_nets')                   then
     begin
         DocumentKind := 'SCH';
     end
@@ -267,7 +270,7 @@ begin
     else if (DocumentKind = 'SCH') and (SchServer <> Nil) then
     begin
         SchDoc := SchServer.GetCurrentSchDocument;
-        if (SchDoc <> Nil) and (SchDoc.ObjectID = eSch) then
+        if (SchDoc <> Nil) and (SchDoc.ObjectID <> eSchLib) then
         begin
             Result := True;
             Exit;
@@ -345,6 +348,15 @@ begin
             if DocumentKind = 'PCB' then
             begin
                 if PCBServer.GetCurrentPCBBoard <> Nil then
+                begin
+                    Result := True;
+                    Exit;
+                end;
+            end
+            else if DocumentKind = 'SCH' then
+            begin
+                SchDoc := SchServer.GetCurrentSchDocument;
+                if (SchDoc <> Nil) and (SchDoc.ObjectID <> eSchLib) then
                 begin
                     Result := True;
                     Exit;

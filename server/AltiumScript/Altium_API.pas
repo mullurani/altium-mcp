@@ -764,6 +764,36 @@ begin
     end;
 end;
 
+function ExecuteConnectPins(RequestData: TStringList): String;
+var
+    AssignmentsList: TStringList;
+begin
+    AssignmentsList := ParseAssignmentsList(RequestData);
+    try
+        if AssignmentsList.Count > 0 then
+            Result := ConnectPins(AssignmentsList)
+        else
+            Result := '{"success": false, "error": "No assignments provided"}';
+    finally
+        AssignmentsList.Free;
+    end;
+end;
+
+function ExecutePlaceDiffPairDirectives(RequestData: TStringList): String;
+var
+    AssignmentsList: TStringList;
+begin
+    AssignmentsList := ParseAssignmentsList(RequestData);
+    try
+        if AssignmentsList.Count > 0 then
+            Result := PlaceDiffPairDirectives(AssignmentsList)
+        else
+            Result := '{"success": false, "error": "No assignments provided"}';
+    finally
+        AssignmentsList.Free;
+    end;
+end;
+
 // Function to execute a command with parameters
 function ExecuteCommand(CommandName: String): String;
 begin
@@ -792,8 +822,14 @@ begin
             Result := ExecutePlaceNetLabels(RequestData);
         'place_power_ports':
             Result := ExecutePlacePowerPorts(RequestData);
+        'connect_pins':
+            Result := ExecuteConnectPins(RequestData);
+        'place_diff_pair_directives':
+            Result := ExecutePlaceDiffPairDirectives(RequestData);
         'get_unconnected_pins':
             Result := GetUnconnectedPins;
+        'get_pin_nets':
+            Result := GetPinNets;
         'get_pcb_layers':
             Result := GetPCBLayers(ROOT_DIR);            
         'set_pcb_layer_visibility':

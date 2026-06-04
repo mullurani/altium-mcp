@@ -19,6 +19,7 @@ import io
 import base64
 import glob
 import re
+import netlist as netlist_mod
 
 # Configure logging
 logging.basicConfig(
@@ -709,6 +710,32 @@ async def place_net_labels(ctx: Context, assignments: list) -> str:
     return json.dumps(response.get("result", {}), indent=2)
 
 @mcp.tool()
+async def connect_pins(ctx: Context, assignments: list) -> str:
+    """
+    Draw wires between two pins on the same schematic sheet so they share a net.
+    If one pin is already on a net (e.g. via an existing port or label), the other
+    joins that net electrically.
+
+    Args:
+        assignments (list): Pipe-delimited strings:
+            - Same component: "DESIGNATOR|PIN_A|PIN_B" e.g. ["IC9|25|26"]
+            - Two components: "DES_A|PIN_A|DES_B|PIN_B"
+
+    Returns:
+        str: JSON with connected_count, skipped_count, and not_found list
+    """
+    logger.info(f"connect_pins: {len(assignments)} assignments")
+    response = await altium_bridge.execute_command(
+        "connect_pins",
+        {"assignments": assignments}
+    )
+    if not response.get("success", False):
+        error_msg = response.get("error", "Unknown error")
+        logger.error(f"Error connecting pins: {error_msg}")
+        return json.dumps({"success": False, "error": f"Failed to connect pins: {error_msg}"})
+    return json.dumps(response.get("result", {}), indent=2)
+
+@mcp.tool()
 async def place_power_ports(ctx: Context, assignments: list) -> str:
     """
     Place Altium power port symbols (VCC, GND, etc.) on schematic component pins.
@@ -771,15 +798,13 @@ async def place_diff_pair_labels(
     Args:
         pos_assignment (str): Pipe-delimited positive pin: "DESIGNATOR|PIN_NAME|NET_NAME_P"
         neg_assignment (str): Pipe-delimited negative pin: "DESIGNATOR|PIN_NAME|NET_NAME_N"
-        add_directive (bool): If True, place a diff-pair directive (not yet implemented).
+        add_directive (bool): If True, also place a Differential Pair directive
+            (a Parameter Set with a DIFFPAIR parameter) touching the positive net.
 
     Returns:
-        str: JSON with placed_count, skipped_count, not_found list
+        str: JSON with placed_count, skipped_count, not_found, and (if requested)
+             directives_placed.
     """
-    if add_directive:
-        logger.info(
-            "place_diff_pair_labels: add_directive=True requested but not yet implemented; net labels placed only"
-        )
     response = await altium_bridge.execute_command(
         "place_net_labels",
         {"assignments": [pos_assignment, neg_assignment]},
@@ -788,7 +813,14 @@ async def place_diff_pair_labels(
         error_msg = response.get("error", "Unknown error")
         logger.error(f"Error placing diff pair labels: {error_msg}")
         return json.dumps({"success": False, "error": f"Failed to place diff pair labels: {error_msg}"})
-    return json.dumps(response.get("result", {}), indent=2)
+    result = _coerce(response.get("result", {}))
+    if add_directive:
+        rd = await altium_bridge.execute_command(
+            "place_diff_pair_directives", {"assignments": [pos_assignment]})
+        resd = _coerce(rd.get("result", {}))
+        if isinstance(result, dict) and isinstance(resd, dict):
+            result["directives_placed"] = resd.get("directives_placed", 0)
+    return json.dumps(result, indent=2)
 
 @mcp.tool()
 async def place_bus_labels(
@@ -822,6 +854,323 @@ async def place_bus_labels(
         logger.error(f"Error placing bus labels: {error_msg}")
         return json.dumps({"success": False, "error": f"Failed to place bus labels: {error_msg}"})
     return json.dumps(response.get("result", {}), indent=2)
+
+
+# =========================================================================== #
+# JITX-like declarative netlist layer
+#
+# These tools turn a declarative netlist (a set of named nets, each listing the
+# pins it connects) into the existing schematic primitives, picking a placement
+# strategy automatically (power ports / wires / net labels / bus / diff). The
+# parsing/planning/diff logic lives in netlist.py (pure Python, unit-tested);
+# everything Altium-touching stays here.
+# =========================================================================== #
+def _coerce(value):
+    """Bridge results may arrive as JSON strings; parse them when possible."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return value
+    return value
+
+
+def _resolve_netlist_path(file_path: str) -> Path:
+    """Resolve a (possibly relative) netlist path against sensible roots."""
+    p = Path(file_path)
+    candidates = [p, MCP_DIR / file_path, MCP_DIR.parent / file_path, Path.cwd() / file_path]
+    for c in candidates:
+        if c.exists():
+            return c
+    return p
+
+
+async def _read_pin_nets():
+    """Read actual pin->net connectivity from Altium. Returns (data, error)."""
+    resp = await altium_bridge.execute_command("get_pin_nets", {})
+    if not resp.get("success", False):
+        return None, resp.get("error", "Unknown error")
+    data = _coerce(resp.get("result", []))
+    if isinstance(data, str):
+        return None, data  # e.g. "ERROR: No project is currently open."
+    if isinstance(data, dict) and "error" in data:
+        return None, data["error"]
+    if not isinstance(data, list):
+        return None, f"Unexpected get_pin_nets result type: {type(data).__name__}"
+    return data, None
+
+
+def _expand_bus_assignments(payload: dict) -> list:
+    out = []
+    lo, hi = payload["bit_range"]
+    step = 1 if hi >= lo else -1
+    for tmpl in payload["assignments"]:
+        for i in range(lo, hi + step, step):
+            out.append(tmpl.replace("{i}", str(i)).replace("{bus}", payload["bus_name"]))
+    return out
+
+
+async def _dispatch_action(action) -> dict:
+    """Execute one planner Action against Altium via the existing primitives."""
+    m, p = action.method, action.payload
+    base = {"net": action.net, "method": m}
+
+    if m == "net_labels":
+        r = await altium_bridge.execute_command("place_net_labels", {"assignments": p["assignments"]})
+    elif m == "power_ports":
+        r = await altium_bridge.execute_command("place_power_ports", {"assignments": p["assignments"]})
+    elif m == "bus_labels":
+        r = await altium_bridge.execute_command(
+            "place_net_labels", {"assignments": _expand_bus_assignments(p)})
+    elif m == "net_class":
+        r = await altium_bridge.execute_command(
+            "create_net_class", {"class_name": p["class_name"], "net_names": p["net_names"]})
+    elif m == "diff_pairs":
+        agg = {"placed_count": 0, "skipped_existing": 0, "conflict_count": 0,
+               "skipped_count": 0, "directives_placed": 0}
+        ok = True
+        for pair in p["pairs"]:
+            r = await altium_bridge.execute_command(
+                "place_net_labels",
+                {"assignments": [pair["pos_assignment"], pair["neg_assignment"]]})
+            ok = ok and r.get("success", False)
+            res = _coerce(r.get("result", {}))
+            if isinstance(res, dict):
+                for k in agg:
+                    agg[k] += res.get(k, 0)
+        # Place the differential-pair directive on each positive net (best-effort:
+        # labels already define the pair via _P/_N, so a directive failure is
+        # non-fatal and only reduces directives_placed).
+        pos_assignments = [pair["pos_assignment"] for pair in p["pairs"]]
+        rd = await altium_bridge.execute_command(
+            "place_diff_pair_directives", {"assignments": pos_assignments})
+        resd = _coerce(rd.get("result", {}))
+        if isinstance(resd, dict):
+            agg["directives_placed"] += resd.get("directives_placed", 0)
+        base.update(success=ok, result=agg)
+        return base
+    elif m == "wire":
+        r = await altium_bridge.execute_command("connect_pins", {"assignments": p["assignments"]})
+        res = _coerce(r.get("result", {}))
+        connected = 0
+        if isinstance(res, dict):
+            connected = res.get("connected_count", 0) + res.get("skipped_existing", 0)
+        if r.get("success", False) and connected < 1:
+            # Wire could not be drawn (e.g. pins not actually on the same sheet)
+            # -> fall back to net labels so the net is still realized.
+            r = await altium_bridge.execute_command(
+                "place_net_labels", {"assignments": p["fallback_assignments"]})
+            base["method"] = "net_labels (wire fallback)"
+    else:
+        return {**base, "success": False, "error": f"unknown method '{m}'"}
+
+    base.update(success=r.get("success", False), result=_coerce(r.get("result", {})))
+    if r.get("error"):
+        base["error"] = r["error"]
+    return base
+
+
+def _summarize(results: list) -> dict:
+    keys = ("placed_count", "skipped_existing", "conflict_count",
+            "connected_count", "skipped_count")
+    summary = {k: 0 for k in keys}
+    for r in results:
+        res = r.get("result", {})
+        if isinstance(res, dict):
+            for k in keys:
+                summary[k] += res.get(k, 0)
+    summary["actions"] = len(results)
+    return summary
+
+
+async def _apply_netlist_obj(nl) -> dict:
+    """Validate against the live schematic, then plan + place. Aborts on errors."""
+    data, err = await _read_pin_nets()
+    if err:
+        return {"success": False, "error": f"could not read schematic connectivity: {err}"}
+    index = netlist_mod.build_pin_index(data)
+
+    errors = netlist_mod.validate(nl, index)
+    if errors:
+        return {"success": False, "validation_errors": errors,
+                "hint": "Nothing was placed. Fix the pin references and re-run."}
+
+    actions = netlist_mod.plan(nl, index)
+    results = [await _dispatch_action(a) for a in actions]
+    return {"success": all(r.get("success", False) for r in results),
+            "summary": _summarize(results), "actions": results}
+
+
+@mcp.tool()
+async def get_netlist(ctx: Context) -> str:
+    """
+    Read the ACTUAL connectivity of every schematic pin in the open project.
+
+    Requires an open Altium project (.PrjPcb); it compiles the project to resolve
+    nets (may take a few seconds). This is the read-back used by check_netlist.
+
+    Returns:
+        str: JSON array of {designator, pin_name, pin_number, sheet, net} objects,
+             where net == "" means the pin is unconnected.
+    """
+    logger.info("get_netlist")
+    data, err = await _read_pin_nets()
+    if err:
+        return json.dumps({"success": False, "error": err})
+    return json.dumps(data, indent=2)
+
+
+@mcp.tool()
+async def connect_nets(ctx: Context, nets: list) -> str:
+    """
+    Connect one or more nets declaratively in a single call (JITX-style).
+
+    Each net names the pins it joins; the tool validates them against the live
+    schematic and AUTO-PICKS how to realize each net: power/ground nets -> power
+    ports, simple 2-pin same-sheet nets -> wires, everything else -> net labels.
+    Safe to re-run: existing labels/wires are detected and not duplicated.
+
+    Args:
+        nets (list): List of net specs, each a dict:
+            {"name": "3V3", "pins": ["U1.VCC", "U2.VDD", "C1.1"], "style": "auto"}
+            - pins are "DESIGNATOR.PIN" (pin name or number).
+            - style (optional): auto | label | wire | power. Default "auto".
+
+    Returns:
+        str: JSON report with per-net actions, a summary, and validation_errors
+             (if any pin reference is invalid, nothing is placed).
+    """
+    logger.info(f"connect_nets: {len(nets)} nets")
+    nl = netlist_mod.Netlist()
+    try:
+        for spec in nets:
+            name = spec["name"]
+            pins = []
+            for ref in spec.get("pins", []):
+                if "." not in ref:
+                    return json.dumps({"success": False,
+                                       "error": f"pin '{ref}' must be DESIGNATOR.PIN"})
+                des, pin = ref.split(".", 1)
+                pins.append(netlist_mod.PinRef(des.strip(), pin.strip()))
+            nl.nets.append(netlist_mod.Net(name, pins, spec.get("style", "auto")))
+    except (KeyError, TypeError) as e:
+        return json.dumps({"success": False, "error": f"malformed net spec: {e}"})
+
+    return json.dumps(await _apply_netlist_obj(nl), indent=2)
+
+
+@mcp.tool()
+async def apply_netlist(ctx: Context, file_path: str) -> str:
+    """
+    Apply a declarative .netlist file to the open schematic ("make it so").
+
+    Parses the file, validates every pin reference against the live schematic,
+    then places net labels / power ports / wires / bus & diff-pair labels using
+    auto-mix. Idempotent: re-running places nothing new and reports skipped_existing.
+    If any pin reference is invalid, NOTHING is placed and the errors are returned.
+
+    Netlist grammar (see server/netlist_rules.txt):
+        power GND 3V3
+        net  3V3 (U1.VCC, U2.VDD, C1.1)
+        net  UART (U1.PA9 -> U2.RX)
+        bus  DATA[0:7] (U1.D{i}, U3.D{i})
+        diff USB0 (U1.DP/DM, J1.DP/DN)
+        class HighSpeed { USB0_P USB0_N }
+        net  I2C (U1.SCL, U2.SCL) style=label
+
+    Args:
+        file_path (str): Path to the .netlist file (absolute, or relative to the
+            server directory / current directory).
+
+    Returns:
+        str: JSON report (actions, summary, validation_errors).
+    """
+    logger.info(f"apply_netlist: {file_path}")
+    path = _resolve_netlist_path(file_path)
+    if not path.exists():
+        return json.dumps({"success": False, "error": f"file not found: {file_path}"})
+    try:
+        nl = netlist_mod.parse_netlist(path.read_text(encoding="utf-8"))
+    except netlist_mod.NetlistError as e:
+        return json.dumps({"success": False, "error": f"parse error: {e}"})
+    return json.dumps(await _apply_netlist_obj(nl), indent=2)
+
+
+@mcp.tool()
+async def check_netlist(ctx: Context, file_path: str) -> str:
+    """
+    Review a .netlist file against the ACTUAL schematic without changing anything.
+
+    Parses the file, reads back real connectivity (get_netlist), and reports, per
+    net: OK (all pins on one net), MISSING (a pin not connected), or CONFLICT
+    (pins split across nets, or two intent-nets merged). Membership-based, so
+    wired nets with Altium-assigned names still verify. This is the "review = a
+    command prompt" half of the workflow.
+
+    Args:
+        file_path (str): Path to the .netlist file.
+
+    Returns:
+        str: JSON {ok, summary, nets:[...], report_text, validation_errors}.
+    """
+    logger.info(f"check_netlist: {file_path}")
+    path = _resolve_netlist_path(file_path)
+    if not path.exists():
+        return json.dumps({"success": False, "error": f"file not found: {file_path}"})
+    try:
+        nl = netlist_mod.parse_netlist(path.read_text(encoding="utf-8"))
+    except netlist_mod.NetlistError as e:
+        return json.dumps({"success": False, "error": f"parse error: {e}"})
+
+    data, err = await _read_pin_nets()
+    if err:
+        return json.dumps({"success": False, "error": f"could not read connectivity: {err}"})
+
+    index = netlist_mod.build_pin_index(data)
+    validation_errors = netlist_mod.validate(nl, index)
+    report = netlist_mod.diff(nl, data)
+    out = report.to_dict()
+    out["success"] = True
+    out["report_text"] = report.to_text()
+    if validation_errors:
+        out["validation_errors"] = validation_errors
+    return json.dumps(out, indent=2)
+
+
+@mcp.tool()
+async def export_netlist(ctx: Context, file_path: str = "") -> str:
+    """
+    Export the open schematic's current connectivity AS a .netlist file.
+
+    Reverse of apply_netlist: bootstraps a declarative netlist from an existing
+    design so you can review/edit it as text. Power-style nets are emitted with a
+    `power` declaration. Re-applying the exported file should be a no-op.
+
+    Args:
+        file_path (str): Where to write the .netlist (optional). If empty, the
+            text is only returned, not written.
+
+    Returns:
+        str: JSON {success, path, netlist_text}.
+    """
+    logger.info(f"export_netlist: {file_path or '(return only)'}")
+    data, err = await _read_pin_nets()
+    if err:
+        return json.dumps({"success": False, "error": err})
+    text = netlist_mod.netlist_from_pin_nets(data)
+    written = ""
+    if file_path:
+        target = Path(file_path)
+        if not target.is_absolute():
+            target = MCP_DIR / file_path
+        try:
+            target.write_text(text, encoding="utf-8")
+            written = str(target)
+        except OSError as e:
+            return json.dumps({"success": False, "error": f"could not write file: {e}",
+                               "netlist_text": text})
+    return json.dumps({"success": True, "path": written, "netlist_text": text}, indent=2)
+
 
 @mcp.tool()
 async def get_schematic_data(ctx: Context, cmp_designators: list) -> str:
