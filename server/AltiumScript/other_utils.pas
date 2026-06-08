@@ -184,7 +184,14 @@ begin
 
     // Commands that handle their own document management - skip focusing
     if (CommandName = 'search_library_symbol') or
-       (CommandName = 'create_pcb_footprint') then
+       (CommandName = 'create_pcb_footprint') or
+       (CommandName = 'create_project') or
+       (CommandName = 'create_schematic_sheet') or
+       (CommandName = 'create_pcb_document') or
+       (CommandName = 'create_schematic_library') or
+       (CommandName = 'create_pcb_library') or
+       (CommandName = 'focus_document') or
+       (CommandName = 'sync_to_pcb') then
     begin
         Result := True;
         Exit;
@@ -223,7 +230,12 @@ begin
             (CommandName = 'connect_pins')                   or
             (CommandName = 'place_diff_pair_directives')     or
             (CommandName = 'get_unconnected_pins')           or
-            (CommandName = 'get_pin_nets')                   then
+            (CommandName = 'get_pin_nets')                   or
+            (CommandName = 'place_component')                or
+            (CommandName = 'assign_footprint')               or
+            (CommandName = 'move_component')                 or
+            (CommandName = 'rotate_component')               or
+            (CommandName = 'get_sch_component_pin_count')    then
     begin
         DocumentKind := 'SCH';
     end

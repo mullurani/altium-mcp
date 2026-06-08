@@ -20,6 +20,22 @@ Note: Having Claude place components on the PCB currently fails hard.
 - Give me a list of all IC designators in my design
 - Get me all length matching rules
 
+## Automated project builder (`build.py`)
+
+Config-driven schematic builder for the industrial I/O reference design (MCU-agnostic).
+
+```bash
+pip install -r requirements-build.txt
+python build.py --config design/design.json --dry-run   # print all bridge calls
+python build.py --config design/design.json             # requires Altium open
+```
+
+- Input: [`design/design.json`](design/design.json) + curated pinmaps in `design/pinmaps/`
+- Orchestrator: [`build.py`](build.py) uses [`server/bridge_client.py`](server/bridge_client.py) (no MCP install required)
+- Optional visual checks: set `ANTHROPIC_API_KEY` (skipped if unset; structural checks still run)
+- MCU swap: change `mcu` + `mcu_package` in `design.json` only — see [`SWAP_TEST.md`](SWAP_TEST.md)
+- Full plan: [`PLAN.md`](PLAN.md)
+
 ## Declarative net connection (JITX-like)
 
 Instead of placing labels one pin at a time, you can describe connectivity as a

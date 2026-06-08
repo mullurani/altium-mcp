@@ -32,6 +32,30 @@ begin
     RESPONSE_FILE := ROOT_DIR + 'response.json';
 end;
 
+procedure WriteScriptLock;
+var
+    LockData: TStringList;
+    LockPath: String;
+begin
+    LockPath := ROOT_DIR + 'script.lock';
+    LockData := TStringList.Create;
+    try
+        LockData.Add(DateTimeToStr(Now));
+        LockData.SaveToFile(LockPath);
+    finally
+        LockData.Free;
+    end;
+end;
+
+procedure ClearScriptLock;
+var
+    LockPath: String;
+begin
+    LockPath := ROOT_DIR + 'script.lock';
+    if FileExists(LockPath) then
+        DeleteFile(LockPath);
+end;
+
 // Extract the component pins logic
 function ExecuteGetComponentPins(RequestData: TStringList): String;
 var
@@ -666,6 +690,181 @@ begin
     end;
 end;
 
+function GetJSONStringParam(RequestData: TStringList; KeyName: String): String;
+var
+    i, ValueStart: Integer;
+    KeyToken: String;
+begin
+    Result := '';
+    KeyToken := '"' + KeyName + '"';
+    for i := 0 to RequestData.Count - 1 do
+    begin
+        if Pos(KeyToken, RequestData[i]) > 0 then
+        begin
+            ValueStart := Pos(':', RequestData[i]) + 1;
+            Result := TrimJSON(Copy(RequestData[i], ValueStart, Length(RequestData[i])));
+            Exit;
+        end;
+    end;
+end;
+
+function GetJSONNumberParam(RequestData: TStringList; KeyName: String; DefaultVal: Integer): Integer;
+var
+    S: String;
+begin
+    S := GetJSONStringParam(RequestData, KeyName);
+    if S = '' then
+        Result := DefaultVal
+    else
+        Result := StrToInt(S);
+end;
+
+function ExecuteCreateProject(RequestData: TStringList): String;
+var
+    ProjectName, ProjectPath: String;
+begin
+    ProjectName := GetJSONStringParam(RequestData, 'project_name');
+    ProjectPath := GetJSONStringParam(RequestData, 'project_path');
+    if (ProjectName = '') or (ProjectPath = '') then
+        Result := 'ERROR: project_name and project_path required'
+    else
+        Result := CreateProject(ProjectName, ProjectPath);
+end;
+
+function ExecuteCreateSchematicSheet(RequestData: TStringList): String;
+var
+    SheetName, ProjectPath: String;
+begin
+    SheetName := GetJSONStringParam(RequestData, 'sheet_name');
+    ProjectPath := GetJSONStringParam(RequestData, 'project_file_path');
+    if ProjectPath = '' then
+        ProjectPath := GetJSONStringParam(RequestData, 'project_path');
+    if SheetName = '' then
+        Result := 'ERROR: sheet_name required'
+    else
+        Result := CreateSchematicSheet(SheetName, ProjectPath);
+end;
+
+function ExecuteCreatePcbDocument(RequestData: TStringList): String;
+var
+    PcbName, ProjectPath: String;
+begin
+    PcbName := GetJSONStringParam(RequestData, 'pcb_name');
+    ProjectPath := GetJSONStringParam(RequestData, 'project_file_path');
+    if ProjectPath = '' then
+        ProjectPath := GetJSONStringParam(RequestData, 'project_path');
+    if PcbName = '' then
+        Result := 'ERROR: pcb_name required'
+    else
+        Result := CreatePcbDocument(PcbName, ProjectPath);
+end;
+
+function ExecuteCreateSchematicLibrary(RequestData: TStringList): String;
+var
+    LibName, ProjectPath: String;
+begin
+    LibName := GetJSONStringParam(RequestData, 'lib_name');
+    ProjectPath := GetJSONStringParam(RequestData, 'project_file_path');
+    if ProjectPath = '' then
+        ProjectPath := GetJSONStringParam(RequestData, 'project_path');
+    if LibName = '' then
+        Result := 'ERROR: lib_name required'
+    else
+        Result := CreateSchematicLibrary(LibName, ProjectPath);
+end;
+
+function ExecuteCreatePcbLibrary(RequestData: TStringList): String;
+var
+    LibName, ProjectPath: String;
+begin
+    LibName := GetJSONStringParam(RequestData, 'lib_name');
+    ProjectPath := GetJSONStringParam(RequestData, 'project_file_path');
+    if ProjectPath = '' then
+        ProjectPath := GetJSONStringParam(RequestData, 'project_path');
+    if LibName = '' then
+        Result := 'ERROR: lib_name required'
+    else
+        Result := CreatePcbLibrary(LibName, ProjectPath);
+end;
+
+function ExecuteFocusDocument(RequestData: TStringList): String;
+var
+    DocPath: String;
+begin
+    DocPath := GetJSONStringParam(RequestData, 'document_path');
+    if DocPath = '' then
+        Result := 'ERROR: document_path required'
+    else
+        Result := FocusDocument(DocPath);
+end;
+
+function ExecutePlaceComponent(RequestData: TStringList): String;
+var
+    LibraryPath, SymbolName, Designator: String;
+    XMils, YMils: Integer;
+begin
+    LibraryPath := GetJSONStringParam(RequestData, 'library_path');
+    SymbolName := GetJSONStringParam(RequestData, 'symbol_name');
+    Designator := GetJSONStringParam(RequestData, 'designator');
+    XMils := GetJSONNumberParam(RequestData, 'x', 0);
+    YMils := GetJSONNumberParam(RequestData, 'y', 0);
+    if (LibraryPath = '') or (SymbolName = '') or (Designator = '') then
+        Result := 'ERROR: library_path, symbol_name, designator required'
+    else
+        Result := PlaceLibraryComponent(LibraryPath, SymbolName, Designator, XMils, YMils);
+end;
+
+function ExecuteAssignFootprint(RequestData: TStringList): String;
+var
+    Designator, FootprintRef, FootprintLib: String;
+begin
+    Designator := GetJSONStringParam(RequestData, 'designator');
+    FootprintRef := GetJSONStringParam(RequestData, 'footprint_ref');
+    FootprintLib := GetJSONStringParam(RequestData, 'footprint_library_path');
+    if (Designator = '') or (FootprintRef = '') then
+        Result := 'ERROR: designator and footprint_ref required'
+    else
+        Result := AssignFootprintToComponent(Designator, FootprintRef, FootprintLib);
+end;
+
+function ExecuteMoveComponent(RequestData: TStringList): String;
+var
+    Designator: String;
+    DxMils, DyMils: Integer;
+begin
+    Designator := GetJSONStringParam(RequestData, 'designator');
+    DxMils := GetJSONNumberParam(RequestData, 'dx_mils', 0);
+    DyMils := GetJSONNumberParam(RequestData, 'dy_mils', 0);
+    if Designator = '' then
+        Result := 'ERROR: designator required'
+    else
+        Result := MoveComponent(Designator, DxMils, DyMils);
+end;
+
+function ExecuteRotateComponent(RequestData: TStringList): String;
+var
+    Designator: String;
+    AngleDeg: Integer;
+begin
+    Designator := GetJSONStringParam(RequestData, 'designator');
+    AngleDeg := GetJSONNumberParam(RequestData, 'angle_degrees', 0);
+    if Designator = '' then
+        Result := 'ERROR: designator required'
+    else
+        Result := RotateComponent(Designator, AngleDeg);
+end;
+
+function ExecuteGetSchComponentPinCount(RequestData: TStringList): String;
+var
+    Designator: String;
+begin
+    Designator := GetJSONStringParam(RequestData, 'designator');
+    if Designator = '' then
+        Result := 'ERROR: designator required'
+    else
+        Result := GetSchComponentPinCount(Designator);
+end;
+
 // Extract the search library symbol logic
 function ExecuteSearchLibrarySymbol(RequestData: TStringList): String;
 var
@@ -856,6 +1055,30 @@ begin
             Result := ExecuteSearchLibrarySymbol(RequestData);
         'create_pcb_footprint':
             Result := ExecuteCreatePCBFootprint(RequestData);
+        'create_project':
+            Result := ExecuteCreateProject(RequestData);
+        'create_schematic_sheet':
+            Result := ExecuteCreateSchematicSheet(RequestData);
+        'create_pcb_document':
+            Result := ExecuteCreatePcbDocument(RequestData);
+        'create_schematic_library':
+            Result := ExecuteCreateSchematicLibrary(RequestData);
+        'create_pcb_library':
+            Result := ExecuteCreatePcbLibrary(RequestData);
+        'focus_document':
+            Result := ExecuteFocusDocument(RequestData);
+        'place_component':
+            Result := ExecutePlaceComponent(RequestData);
+        'assign_footprint':
+            Result := ExecuteAssignFootprint(RequestData);
+        'move_component':
+            Result := ExecuteMoveComponent(RequestData);
+        'rotate_component':
+            Result := ExecuteRotateComponent(RequestData);
+        'get_sch_component_pin_count':
+            Result := ExecuteGetSchComponentPinCount(RequestData);
+        'sync_to_pcb':
+            Result := SyncToPcb;
     else
         ShowMessage('Error: Unknown command: ' + CommandName);
     end;
@@ -953,11 +1176,13 @@ var
 begin
     // Initialize file paths based on script location
     InitializeFilePaths();
+    WriteScriptLock;
+    try
 
     // Check if request file exists
     if not FileExists(REQUEST_FILE) then
     begin
-        ShowMessage('Error: No request file found at ' + REQUEST_FILE);
+        WriteResponse(False, '', 'No request file found');
         Exit;
     end;
 
@@ -1005,22 +1230,21 @@ begin
                 else
                 begin
                     WriteResponse(False, '', 'Command execution failed');
-                    ShowMessage('Error: Command execution failed');
                 end;
             end
             else
             begin
                 WriteResponse(False, '', 'No command specified');
-                ShowMessage('Error: No command specified');
             end;
         finally
             RequestData.Free;
             Params.Free;
         end;
     except
-        // Simple exception handling without the specific exception type
         WriteResponse(False, '', 'Exception occurred during script execution');
-        ShowMessage('Error: Exception occurred during script execution');
+    end;
+    finally
+        ClearScriptLock;
     end;
 end;
 

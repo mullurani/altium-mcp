@@ -2086,6 +2086,170 @@ async def create_pcb_footprint(ctx: Context, footprint_name: str, description: s
     return json.dumps(result, indent=2)
 
 @mcp.tool()
+async def create_project(ctx: Context, project_name: str, project_path: str) -> str:
+    """Create a new Altium PCB project (.PrjPcb) at project_path."""
+    response = await altium_bridge.execute_command(
+        "create_project", {"project_name": project_name, "project_path": project_path}
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def create_schematic_sheet(
+    ctx: Context, sheet_name: str, project_file_path: str = ""
+) -> str:
+    """Create and focus a schematic sheet in the active project."""
+    response = await altium_bridge.execute_command(
+        "create_schematic_sheet",
+        {"sheet_name": sheet_name, "project_file_path": project_file_path},
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def create_pcb_document(ctx: Context, pcb_name: str, project_file_path: str = "") -> str:
+    """Create a PCB document and add it to the active project."""
+    response = await altium_bridge.execute_command(
+        "create_pcb_document",
+        {"pcb_name": pcb_name, "project_file_path": project_file_path},
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def create_schematic_library(
+    ctx: Context, lib_name: str, project_file_path: str = ""
+) -> str:
+    """Create a schematic library (.SchLib) and leave it focused."""
+    response = await altium_bridge.execute_command(
+        "create_schematic_library",
+        {"lib_name": lib_name, "project_file_path": project_file_path},
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def create_pcb_library(ctx: Context, lib_name: str, project_file_path: str = "") -> str:
+    """Create a PCB footprint library (.PcbLib)."""
+    response = await altium_bridge.execute_command(
+        "create_pcb_library",
+        {"lib_name": lib_name, "project_file_path": project_file_path},
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def focus_document(ctx: Context, document_path: str) -> str:
+    """Open and focus an existing project document by path."""
+    response = await altium_bridge.execute_command(
+        "focus_document", {"document_path": document_path}
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def place_component(
+    ctx: Context,
+    library_path: str,
+    symbol_name: str,
+    designator: str,
+    x: int,
+    y: int,
+) -> str:
+    """Place a library symbol on the focused schematic (x/y in mils)."""
+    response = await altium_bridge.execute_command(
+        "place_component",
+        {
+            "library_path": library_path,
+            "symbol_name": symbol_name,
+            "designator": designator,
+            "x": x,
+            "y": y,
+        },
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def assign_footprint(
+    ctx: Context,
+    designator: str,
+    footprint_ref: str,
+    footprint_library_path: str = "",
+) -> str:
+    """Assign footprint to a schematic component."""
+    response = await altium_bridge.execute_command(
+        "assign_footprint",
+        {
+            "designator": designator,
+            "footprint_ref": footprint_ref,
+            "footprint_library_path": footprint_library_path,
+        },
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def move_component(ctx: Context, designator: str, dx_mils: int, dy_mils: int) -> str:
+    """Shift a schematic component by dx/dy mils."""
+    response = await altium_bridge.execute_command(
+        "move_component",
+        {"designator": designator, "dx_mils": dx_mils, "dy_mils": dy_mils},
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def rotate_component(ctx: Context, designator: str, angle_degrees: int) -> str:
+    """Rotate a schematic component (0, 90, 180, 270 degrees)."""
+    response = await altium_bridge.execute_command(
+        "rotate_component",
+        {"designator": designator, "angle_degrees": angle_degrees},
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def get_sch_component_pin_count(ctx: Context, designator: str) -> str:
+    """Return pin count for a component on the focused schematic sheet."""
+    response = await altium_bridge.execute_command(
+        "get_sch_component_pin_count", {"designator": designator}
+    )
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
+async def sync_to_pcb(ctx: Context) -> str:
+    """Run Sch:UpdatePCB ECO to push schematic changes to PCB."""
+    response = await altium_bridge.execute_command("sync_to_pcb", {})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "Unknown error")})
+    return json.dumps(response.get("result", {}), indent=2)
+
+
+@mcp.tool()
 async def get_server_status(ctx: Context) -> str:
     """Get the current status of the Altium MCP server"""
     status = {

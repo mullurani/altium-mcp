@@ -1,0 +1,26 @@
+{
+  "part_number": "M031FB0AE",
+  "package": "TSSOP20",
+  "pins": [
+    {"pin_num": "1", "pin_name": "ICE_DAT", "pin_type": "I/O", "alt_functions": ["PB.7", "ICE_DAT"]},
+    {"pin_num": "2", "pin_name": "ICE_CLK", "pin_type": "I/O", "alt_functions": ["PB.6", "ICE_CLK"]},
+    {"pin_num": "3", "pin_name": "PB5", "pin_type": "I/O", "alt_functions": ["PB.5"]},
+    {"pin_num": "4", "pin_name": "PB4", "pin_type": "I/O", "alt_functions": ["PB.4"]},
+    {"pin_num": "5", "pin_name": "PB3", "pin_type": "I/O", "alt_functions": ["PB.3"]},
+    {"pin_num": "6", "pin_name": "PB2", "pin_type": "I/O", "alt_functions": ["PB.2"]},
+    {"pin_num": "7", "pin_name": "PB1", "pin_type": "I/O", "alt_functions": ["PB.1"]},
+    {"pin_num": "8", "pin_name": "PB0", "pin_type": "I/O", "alt_functions": ["PB.0"]},
+    {"pin_num": "9", "pin_name": "GND", "pin_type": "Power", "alt_functions": []},
+    {"pin_num": "10", "pin_name": "VDD", "pin_type": "Power", "alt_functions": ["3V3"]},
+    {"pin_num": "11", "pin_name": "PA11", "pin_type": "I/O", "alt_functions": ["PA.11"]},
+    {"pin_num": "12", "pin_name": "PA10", "pin_type": "I/O", "alt_functions": ["PA.10"]},
+    {"pin_num": "13", "pin_name": "PA9", "pin_type": "I/O", "alt_functions": ["PA.9"]},
+    {"pin_num": "14", "pin_name": "PA8", "pin_type": "I/O", "alt_functions": ["PA.8"]},
+    {"pin_num": "15", "pin_name": "PA7", "pin_type": "I/O", "alt_functions": ["PA.7"]},
+    {"pin_num": "16", "pin_name": "PA6", "pin_type": "I/O", "alt_functions": ["PA.6"]},
+    {"pin_num": "17", "pin_name": "PA3", "pin_type": "I/O", "alt_functions": ["PA.3", "PA3"]},
+    {"pin_num": "18", "pin_name": "PA2", "pin_type": "I/O", "alt_functions": ["PA.2", "PA2"]},
+    {"pin_num": "19", "pin_name": "PA1", "pin_type": "I/O", "alt_functions": ["PA.1", "PA1"]},
+    {"pin_num": "20", "pin_name": "PA0", "pin_type": "I/O", "alt_functions": ["PA.0", "PA0"]}
+  ]
+}

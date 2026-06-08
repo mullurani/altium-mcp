@@ -1714,3 +1714,444 @@ begin
         ResultArray.Free;
     end;
 end;
+
+// --------------------------------------------------------------------------
+// Automated builder: place, footprint, move, rotate, pin count
+// --------------------------------------------------------------------------
+
+function FindLibComponent(LibDoc: ISch_Lib; SymbolName: String): ISch_Component;
+var
+    Iterator: ISch_Iterator;
+    LibComp: ISch_Component;
+    RefUpper: String;
+begin
+    Result := Nil;
+    RefUpper := UpperCase(SymbolName);
+    Iterator := LibDoc.SchIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+    LibComp := Iterator.FirstSchObject;
+    while LibComp <> Nil do
+    begin
+        if UpperCase(LibComp.LibReference) = RefUpper then
+        begin
+            Result := LibComp;
+            Break;
+        end;
+        LibComp := Iterator.NextSchObject;
+    end;
+    LibDoc.SchIterator_Destroy(Iterator);
+end;
+
+function GetCurrentSchSheet: ISch_Document;
+begin
+    Result := SchServer.GetCurrentSchDocument;
+    if (Result <> Nil) and (Result.ObjectID <> eSchDoc) then
+        Result := Nil;
+end;
+
+function SetSchComponentParameter(Comp: ISch_Component; ParamName, ParamValue: String): Boolean;
+var
+    PIt: ISch_Iterator;
+    SchParam: ISch_Parameter;
+    NewParam: ISch_Parameter;
+begin
+    Result := False;
+    PIt := Comp.SchIterator_Create;
+    PIt.AddFilter_ObjectSet(MkSet(eParameter));
+    SchParam := PIt.FirstSchObject;
+    while SchParam <> Nil do
+    begin
+        if SchParam.Name = ParamName then
+        begin
+            SchParam.Text := ParamValue;
+            Comp.SchIterator_Destroy(PIt);
+            Result := True;
+            Exit;
+        end;
+        SchParam := PIt.NextSchObject;
+    end;
+    Comp.SchIterator_Destroy(PIt);
+
+    NewParam := SchServer.SchObjectFactory(eParameter, eCreate_Default);
+    if NewParam <> Nil then
+    begin
+        NewParam.Name := ParamName;
+        NewParam.Text := ParamValue;
+        NewParam.IsHidden := False;
+        Comp.AddSchObject(NewParam);
+        Result := True;
+    end;
+end;
+
+function PlaceLibraryComponent(LibraryPath, SymbolName, Designator: String;
+    XMils, YMils: Integer): String;
+var
+    SchDoc: ISch_Document;
+    SchDocPath: String;
+    LibDoc: ISch_Lib;
+    ServerDoc: IServerDocument;
+    LibComp, NewComp: ISch_Component;
+    PinIt: ISch_Iterator;
+    LibPin, NewPin: ISch_Pin;
+    ResultProps: TStringList;
+    OutputLines: TStringList;
+    PinCount: Integer;
+begin
+    SchDoc := GetCurrentSchSheet;
+    if SchDoc = Nil then
+    begin
+        Result := 'ERROR: No schematic sheet focused';
+        Exit;
+    end;
+    SchDocPath := SchDoc.DocumentName;
+
+    if FileExists(LibraryPath) then
+    begin
+        ServerDoc := Client.OpenDocument('SCHLIB', LibraryPath);
+        if ServerDoc <> Nil then
+            Client.ShowDocument(ServerDoc);
+    end;
+
+    LibDoc := SchServer.GetCurrentSchDocument;
+    if (LibDoc = Nil) or (LibDoc.ObjectID <> eSchLib) then
+    begin
+        LibDoc := SchServer.GetSchDocumentByPath(LibraryPath);
+    end;
+
+    if LibDoc = Nil then
+    begin
+        Result := 'ERROR: Could not open schematic library: ' + LibraryPath;
+        Exit;
+    end;
+
+    LibComp := FindLibComponent(LibDoc, SymbolName);
+    if LibComp = Nil then
+    begin
+        Result := 'ERROR: Symbol not found in library: ' + SymbolName;
+        Exit;
+    end;
+
+    if SchDocPath <> '' then
+    begin
+        ServerDoc := Client.OpenDocument('SCH', SchDocPath);
+        if ServerDoc <> Nil then
+            Client.ShowDocument(ServerDoc);
+    end;
+    Sleep(300);
+    SchDoc := GetCurrentSchSheet;
+    if SchDoc = Nil then
+    begin
+        Result := 'ERROR: Lost schematic focus after opening library';
+        Exit;
+    end;
+
+    SchServer.ProcessControl.PreProcess(SchDoc, '');
+    try
+        NewComp := SchServer.SchObjectFactory(eSchComponent, eCreate_Default);
+        if NewComp = Nil then
+        begin
+            Result := 'ERROR: SchObjectFactory eSchComponent failed';
+            Exit;
+        end;
+
+        NewComp.LibReference := LibComp.LibReference;
+        NewComp.ComponentDescription := LibComp.ComponentDescription;
+        NewComp.Designator.Text := Designator;
+        NewComp.PartCount := LibComp.PartCount;
+        NewComp.CurrentPartID := 1;
+        NewComp.DisplayMode := 0;
+        NewComp.Location := Point(MilsToCoord(XMils), MilsToCoord(YMils));
+
+        PinCount := 0;
+        PinIt := LibComp.SchIterator_Create;
+        PinIt.AddFilter_ObjectSet(MkSet(ePin));
+        LibPin := PinIt.FirstSchObject;
+        while LibPin <> Nil do
+        begin
+            NewPin := SchServer.SchObjectFactory(ePin, eCreate_Default);
+            if NewPin <> Nil then
+            begin
+                NewPin.Designator := LibPin.Designator;
+                NewPin.Name := LibPin.Name;
+                NewPin.Electrical := LibPin.Electrical;
+                NewPin.Orientation := LibPin.Orientation;
+                NewPin.Location := LibPin.Location;
+                NewPin.OwnerPartId := LibPin.OwnerPartId;
+                NewPin.OwnerPartDisplayMode := LibPin.OwnerPartDisplayMode;
+                NewComp.AddSchObject(NewPin);
+                PinCount := PinCount + 1;
+            end;
+            LibPin := PinIt.NextSchObject;
+        end;
+        LibComp.SchIterator_Destroy(PinIt);
+
+        RegisterSchObject(SchDoc, NewComp);
+        SchDoc.GraphicallyInvalidate;
+
+        ResultProps := TStringList.Create;
+        try
+            AddJSONBoolean(ResultProps, 'success', True);
+            AddJSONProperty(ResultProps, 'designator', Designator);
+            AddJSONInteger(ResultProps, 'actual_x_mils', XMils);
+            AddJSONInteger(ResultProps, 'actual_y_mils', YMils);
+            AddJSONInteger(ResultProps, 'pins_placed', PinCount);
+            OutputLines := TStringList.Create;
+            try
+                OutputLines.Text := BuildJSONObject(ResultProps);
+                Result := OutputLines.Text;
+            finally
+                OutputLines.Free;
+            end;
+        finally
+            ResultProps.Free;
+        end;
+    finally
+        SchServer.ProcessControl.PostProcess(SchDoc, '');
+    end;
+end;
+
+function AssignFootprintToComponent(Designator, FootprintRef, FootprintLibraryPath: String): String;
+var
+    SchDoc: ISch_Document;
+    Iterator: ISch_Iterator;
+    Component: ISch_Component;
+    ResultProps: TStringList;
+    OutputLines: TStringList;
+    Found: Boolean;
+begin
+    SchDoc := GetCurrentSchSheet;
+    if SchDoc = Nil then
+    begin
+        Result := 'ERROR: No schematic sheet focused';
+        Exit;
+    end;
+
+    Found := False;
+    Iterator := SchDoc.SchIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+    Component := Iterator.FirstSchObject;
+    while Component <> Nil do
+    begin
+        if Component.Designator.Text = Designator then
+        begin
+            SchServer.ProcessControl.PreProcess(SchDoc, '');
+            try
+                SetSchComponentParameter(Component, 'Footprint', FootprintRef);
+                if FootprintLibraryPath <> '' then
+                    SetSchComponentParameter(Component, 'Footprint Library', FootprintLibraryPath);
+                SchDoc.GraphicallyInvalidate;
+            finally
+                SchServer.ProcessControl.PostProcess(SchDoc, '');
+            end;
+            Found := True;
+            Break;
+        end;
+        Component := Iterator.NextSchObject;
+    end;
+    SchDoc.SchIterator_Destroy(Iterator);
+
+    if not Found then
+    begin
+        Result := 'ERROR: Component not found: ' + Designator;
+        Exit;
+    end;
+
+    ResultProps := TStringList.Create;
+    try
+        AddJSONBoolean(ResultProps, 'success', True);
+        AddJSONProperty(ResultProps, 'designator', Designator);
+        AddJSONProperty(ResultProps, 'footprint_assigned', FootprintRef);
+        OutputLines := TStringList.Create;
+        try
+            OutputLines.Text := BuildJSONObject(ResultProps);
+            Result := OutputLines.Text;
+        finally
+            OutputLines.Free;
+        end;
+    finally
+        ResultProps.Free;
+    end;
+end;
+
+function FindSchComponent(SchDoc: ISch_Document; Designator: String): ISch_Component;
+var
+    Iterator: ISch_Iterator;
+    Component: ISch_Component;
+begin
+    Result := Nil;
+    Iterator := SchDoc.SchIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+    Component := Iterator.FirstSchObject;
+    while Component <> Nil do
+    begin
+        if Component.Designator.Text = Designator then
+        begin
+            Result := Component;
+            Break;
+        end;
+        Component := Iterator.NextSchObject;
+    end;
+    SchDoc.SchIterator_Destroy(Iterator);
+end;
+
+function MoveComponent(Designator: String; DxMils, DyMils: Integer): String;
+var
+    SchDoc: ISch_Document;
+    Component: ISch_Component;
+    NewX, NewY: Integer;
+    ResultProps: TStringList;
+    OutputLines: TStringList;
+begin
+    SchDoc := GetCurrentSchSheet;
+    if SchDoc = Nil then
+    begin
+        Result := 'ERROR: No schematic sheet focused';
+        Exit;
+    end;
+
+    Component := FindSchComponent(SchDoc, Designator);
+    if Component = Nil then
+    begin
+        Result := 'ERROR: Component not found: ' + Designator;
+        Exit;
+    end;
+
+    NewX := CoordToMils(Component.Location.X) + DxMils;
+    NewY := CoordToMils(Component.Location.Y) + DyMils;
+
+    SchServer.ProcessControl.PreProcess(SchDoc, '');
+    try
+        Component.Location := Point(MilsToCoord(NewX), MilsToCoord(NewY));
+        SchDoc.GraphicallyInvalidate;
+    finally
+        SchServer.ProcessControl.PostProcess(SchDoc, '');
+    end;
+
+    ResultProps := TStringList.Create;
+    try
+        AddJSONBoolean(ResultProps, 'success', True);
+        AddJSONProperty(ResultProps, 'designator', Designator);
+        AddJSONInteger(ResultProps, 'new_x', NewX);
+        AddJSONInteger(ResultProps, 'new_y', NewY);
+        OutputLines := TStringList.Create;
+        try
+            OutputLines.Text := BuildJSONObject(ResultProps);
+            Result := OutputLines.Text;
+        finally
+            OutputLines.Free;
+        end;
+    finally
+        ResultProps.Free;
+    end;
+end;
+
+function DegreesToOrientation(AngleDeg: Integer): TRotationBy90;
+begin
+    AngleDeg := AngleDeg mod 360;
+    if AngleDeg < 0 then AngleDeg := AngleDeg + 360;
+    case AngleDeg of
+        90:  Result := eRotate90;
+        180: Result := eRotate180;
+        270: Result := eRotate270;
+    else
+        Result := eRotate0;
+    end;
+end;
+
+function RotateComponent(Designator: String; AngleDegrees: Integer): String;
+var
+    SchDoc: ISch_Document;
+    Component: ISch_Component;
+    ResultProps: TStringList;
+    OutputLines: TStringList;
+begin
+    SchDoc := GetCurrentSchSheet;
+    if SchDoc = Nil then
+    begin
+        Result := 'ERROR: No schematic sheet focused';
+        Exit;
+    end;
+
+    Component := FindSchComponent(SchDoc, Designator);
+    if Component = Nil then
+    begin
+        Result := 'ERROR: Component not found: ' + Designator;
+        Exit;
+    end;
+
+    SchServer.ProcessControl.PreProcess(SchDoc, '');
+    try
+        Component.Orientation := DegreesToOrientation(AngleDegrees);
+        SchDoc.GraphicallyInvalidate;
+    finally
+        SchServer.ProcessControl.PostProcess(SchDoc, '');
+    end;
+
+    ResultProps := TStringList.Create;
+    try
+        AddJSONBoolean(ResultProps, 'success', True);
+        AddJSONProperty(ResultProps, 'designator', Designator);
+        AddJSONInteger(ResultProps, 'angle', AngleDegrees);
+        OutputLines := TStringList.Create;
+        try
+            OutputLines.Text := BuildJSONObject(ResultProps);
+            Result := OutputLines.Text;
+        finally
+            OutputLines.Free;
+        end;
+    finally
+        ResultProps.Free;
+    end;
+end;
+
+function GetSchComponentPinCount(Designator: String): String;
+var
+    SchDoc: ISch_Document;
+    Component: ISch_Component;
+    PinIt: ISch_Iterator;
+    Pin: ISch_Pin;
+    PinCount: Integer;
+    ResultProps: TStringList;
+    OutputLines: TStringList;
+begin
+    SchDoc := GetCurrentSchSheet;
+    if SchDoc = Nil then
+    begin
+        Result := 'ERROR: No schematic sheet focused';
+        Exit;
+    end;
+
+    Component := FindSchComponent(SchDoc, Designator);
+    if Component = Nil then
+    begin
+        Result := 'ERROR: Component not found: ' + Designator;
+        Exit;
+    end;
+
+    PinCount := 0;
+    PinIt := Component.SchIterator_Create;
+    PinIt.AddFilter_ObjectSet(MkSet(ePin));
+    Pin := PinIt.FirstSchObject;
+    while Pin <> Nil do
+    begin
+        PinCount := PinCount + 1;
+        Pin := PinIt.NextSchObject;
+    end;
+    Component.SchIterator_Destroy(PinIt);
+
+    ResultProps := TStringList.Create;
+    try
+        AddJSONBoolean(ResultProps, 'success', True);
+        AddJSONProperty(ResultProps, 'designator', Designator);
+        AddJSONInteger(ResultProps, 'pin_count', PinCount);
+        OutputLines := TStringList.Create;
+        try
+            OutputLines.Text := BuildJSONObject(ResultProps);
+            Result := OutputLines.Text;
+        finally
+            OutputLines.Free;
+        end;
+    finally
+        ResultProps.Free;
+    end;
+end;

@@ -1,0 +1,76 @@
+{
+  "project_name": "isolated_io",
+  "project_path": "C:/AltiumProjects/isolated_io",
+  "mcu": "M031FB0AE",
+  "mcu_package": "TSSOP20",
+  "power": {
+    "module": "B2403S-1WR3",
+    "input": "24V",
+    "input_gnd": "24V_GND",
+    "output": "3V3",
+    "output_gnd": "GND"
+  },
+  "inputs": [
+    {
+      "id": "IN1",
+      "port": "PA0",
+      "field_net": "IN1_FIELD",
+      "opto": "PC817",
+      "pullup_ohms": 4700,
+      "pullup_to": "3V3"
+    },
+    {
+      "id": "IN2",
+      "port": "PA1",
+      "field_net": "IN2_FIELD",
+      "opto": "PC817",
+      "pullup_ohms": 4700,
+      "pullup_to": "3V3"
+    }
+  ],
+  "outputs": [
+    {
+      "id": "OUT1",
+      "port": "PA2",
+      "drive_net": "RELAY1_DRV",
+      "driver": "BC547",
+      "base_ohms": 1000
+    },
+    {
+      "id": "OUT2",
+      "port": "PA3",
+      "drive_net": "RELAY2_DRV",
+      "driver": "BC547",
+      "base_ohms": 1000
+    }
+  ],
+  "connectors": {
+    "inputs": "KF301-2P",
+    "outputs": "KF301-3P",
+    "debug": "HDR2x2",
+    "debug_pins": ["ICE_CLK", "ICE_DAT"]
+  },
+  "net_names": {
+    "power": ["3V3", "GND", "24V", "24V_GND"],
+    "signal": ["IN1", "IN2", "RELAY1_DRV", "RELAY2_DRV"],
+    "field": ["IN1_FIELD", "IN2_FIELD"],
+    "debug": ["ICE_CLK", "ICE_DAT"]
+  },
+  "library_paths": {
+    "symbol_lib": "{project_path}/isolated_io.SchLib",
+    "footprint_lib": "{project_path}/footprints.PcbLib",
+    "external_symbol_libs": []
+  },
+  "footprints": {
+    "M031FB0AE": "TSSOP20",
+    "M031EB0AE": "LQFP32",
+    "B2403S-1WR3": "SIP7",
+    "PC817": "SOP4",
+    "BC547": "SOT23",
+    "KF301-2P": "KF301-2P",
+    "KF301-3P": "KF301-3P",
+    "HDR2x2": "HDR2x2",
+    "RELAY": "KF301-3P",
+    "RES": "RES0603"
+  }
+}

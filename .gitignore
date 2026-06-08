@@ -10,8 +10,18 @@ dist/
 wheels/
 *.egg-info
 *.log
-*.json
-*.png
+cache/
+tests/screenshots/
+*.PrjPcb
+*.SchDoc
+*.PcbDoc
+*.SchLib
+*.PcbLib
+.build_state.json
+# Keep design JSON and test fixtures
+!design/**/*.json
+!design/design.json
+!tests/**/*.json
 *.dxt
 
 # Virtual environments
